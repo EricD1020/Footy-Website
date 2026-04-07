@@ -12,12 +12,21 @@ Verified: 2026-04-02 (Phase 2 handshake + source swap)
 import asyncio
 import hashlib
 import json
+import os
 import re
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
+
+# ─── Playwright Browser Path ──────────────────────────────────────────────────
+# Must be set BEFORE playwright is imported.
+# On Railway, browsers are installed to /app/.playwright-browsers/ at build
+# time. The default /root/.cache/ path is not preserved between build and
+# runtime containers, so we hardcode the path here as the source of truth.
+if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
+    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/app/.playwright-browsers"
 
 import feedparser
 from bs4 import BeautifulSoup

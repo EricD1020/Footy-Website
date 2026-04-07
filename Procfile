@@ -1,1 +1,1 @@
-web: gunicorn --worker-class sync --workers 1 --bind 0.0.0.0:$PORT --timeout 30 --chdir tools server:app
+web: PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers playwright install chromium && PLAYWRIGHT_BROWSERS_PATH=/app/.playwright-browsers gunicorn --worker-class sync --workers 1 --bind 0.0.0.0:$PORT --timeout 30 --chdir tools server:app
