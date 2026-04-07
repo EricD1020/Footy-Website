@@ -57,7 +57,7 @@ def run_scraper() -> tuple[bool, str]:
             return False, err
         return True, result.stdout
     except subprocess.TimeoutExpired:
-        return False, "Scraper timed out after 120 seconds"
+        return False, "Scraper timed out after 300 seconds"
     except Exception as e:
         return False, str(e)
 

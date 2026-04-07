@@ -33,5 +33,5 @@ cmds = [
   "playwright install chromium",
 ]
 
-[start]
-cmd = "python tools/server.py"
+# NOTE: No [start] block here — Railway uses the Procfile instead.
+# Having both causes a conflict; Procfile with gunicorn is the correct prod server.
