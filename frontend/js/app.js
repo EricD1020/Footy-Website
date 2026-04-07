@@ -3,8 +3,11 @@
 // ─── Constants ────────────────────────────────────────────────────────────────
 const API_ARTICLES    = '/api/articles';
 const API_SCRAPE      = '/api/scrape';
+const API_SCRAPE_STATUS = '/api/scrape/status';
 const LS_SAVED_KEY    = 'footy_saved_ids';
 const AUTO_REFRESH_MS = 24 * 60 * 60 * 1000;
+const POLL_INTERVAL_MS = 4000;   // how often to check scrape status
+const POLL_MAX_CHECKS  = 90;     // 90 × 4s = 6 min max wait
 
 const SOURCE_LABELS = {
   bbc_sport: 'BBC Sport',
@@ -90,15 +93,54 @@ async function handleRefresh() {
   state.loading = true;
   $btnRefresh.classList.add('loading');
   $btnRefresh.disabled = true;
-  showToast('🔄 Fetching latest articles…', 'info');
+
   try {
-    const payload = await triggerScrape();
+    // 1. Kick off the background scrape — returns 202 immediately
+    const kickoff = await fetch(API_SCRAPE, { method: 'POST' });
+    if (kickoff.status === 409) {
+      showToast('⏳ Scrape already in progress…', 'info');
+    } else if (!kickoff.ok) {
+      throw new Error(`HTTP ${kickoff.status}`);
+    } else {
+      showToast('⚽ Scraping latest articles… (this takes ~2 min)', 'info');
+    }
+
+    // 2. Poll /api/scrape/status until running === false
+    let checks = 0;
+    await new Promise((resolve, reject) => {
+      const interval = setInterval(async () => {
+        checks++;
+        try {
+          const res  = await fetch(API_SCRAPE_STATUS);
+          const data = await res.json();
+
+          if (!data.running) {
+            clearInterval(interval);
+            if (data.last_error) {
+              reject(new Error(data.last_error));
+            } else {
+              resolve();
+            }
+          } else if (checks >= POLL_MAX_CHECKS) {
+            clearInterval(interval);
+            reject(new Error('Scrape timed out on client'));
+          }
+        } catch (pollErr) {
+          clearInterval(interval);
+          reject(pollErr);
+        }
+      }, POLL_INTERVAL_MS);
+    });
+
+    // 3. Scrape finished — fetch fresh articles
+    const payload = await fetchArticles();
     applyPayload(payload);
     scheduleAutoRefresh();
     showToast('✅ Feed updated!', 'success');
+
   } catch (err) {
     console.error(err);
-    showToast('❌ Refresh failed', 'error');
+    showToast('❌ Refresh failed: ' + err.message, 'error');
   } finally {
     $btnRefresh.classList.remove('loading');
     $btnRefresh.disabled = false;

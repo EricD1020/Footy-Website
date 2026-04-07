@@ -10,6 +10,7 @@ import json
 import os
 import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from flask import Flask, jsonify, send_from_directory, send_file
@@ -26,6 +27,16 @@ app = Flask(__name__, static_folder=str(FRONTEND_DIR))
 CORS(app)
 
 PORT = int(os.environ.get("PORT", 5000))
+
+# ─── Scrape State ─────────────────────────────────────────────────────────────
+# Shared state for background scrape job.
+# Using a dict + threading.Lock instead of class to keep it simple.
+_scrape_lock = threading.Lock()
+scrape_state = {
+    "running": False,
+    "last_error": None,
+    "last_success": None,  # ISO timestamp of last successful scrape
+}
 
 
 # ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -62,6 +73,25 @@ def run_scraper() -> tuple[bool, str]:
         return False, str(e)
 
 
+def _run_scraper_background():
+    """
+    Run the scraper in a background thread, updating scrape_state when done.
+    Called only from trigger_scrape() — never directly.
+    """
+    print("🔄 Background scrape started")
+    success, message = run_scraper()
+    with _scrape_lock:
+        scrape_state["running"] = False
+        if success:
+            payload = read_articles()
+            scrape_state["last_success"] = payload.get("last_updated")
+            scrape_state["last_error"] = None
+            print("✅ Background scrape complete")
+        else:
+            scrape_state["last_error"] = message
+            print(f"❌ Background scrape failed: {message}", file=sys.stderr)
+
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.route("/")
@@ -95,17 +125,31 @@ def get_articles():
 @app.route("/api/scrape", methods=["POST"])
 def trigger_scrape():
     """
-    Trigger the scraper on demand.
-    Returns the updated articles payload on success.
+    Start a background scrape job and return immediately (202 Accepted).
+    The frontend should poll /api/scrape/status and then /api/articles.
+    Returns 409 if a scrape is already in progress.
     """
-    print("🔄 Manual scrape triggered via /api/scrape")
-    success, message = run_scraper()
-    if not success:
-        return jsonify({"error": message}), 500
+    with _scrape_lock:
+        if scrape_state["running"]:
+            return jsonify({"status": "already_running"}), 409
+        scrape_state["running"] = True
+        scrape_state["last_error"] = None
 
-    payload = read_articles()
-    payload["just_scraped"] = True
-    return jsonify(payload)
+    print("🔄 Manual scrape triggered via /api/scrape")
+    t = threading.Thread(target=_run_scraper_background, daemon=True)
+    t.start()
+    return jsonify({"status": "started"}), 202
+
+
+@app.route("/api/scrape/status", methods=["GET"])
+def scrape_status():
+    """
+    Poll this endpoint to check whether a background scrape is still running.
+    Response shape:
+      { running: bool, last_error: str|null, last_success: str|null }
+    """
+    with _scrape_lock:
+        return jsonify(dict(scrape_state))
 
 
 @app.route("/api/health", methods=["GET"])
