@@ -1,0 +1,22 @@
+Colors
+Primary:
+#445566
+Secondary:
+#99AABB
+Accent:
+#00AC1C
+Background:
+#12161A
+Text Primary:
+#2C3440
+Link:
+#2C3440
+Fonts
+GraphikWeb(body)
+TiemposHeadlineWeb(heading)
+Typography
+primary: GraphikWeb
+heading: TiemposHeadlineWeb
+h1: 24px
+h2: 36px
+body: 12px
