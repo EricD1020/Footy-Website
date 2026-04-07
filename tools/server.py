@@ -49,7 +49,7 @@ def run_scraper() -> tuple[bool, str]:
             [sys.executable, str(SCRAPER)],
             capture_output=True,
             text=True,
-            timeout=120,  # 2-minute max
+            timeout=300,  # 5-minute max (embed resolution adds ~60s)
         )
         if result.returncode != 0:
             err = result.stderr or "Unknown error"

@@ -229,6 +229,107 @@ def parse_fotmob(html: str, cutoff: datetime) -> list[dict]:
     return articles
 
 
+# ─── Resolve External Fotmob Source URLs ─────────────────────────────────────
+
+# External Fotmob articles use ULID-like short IDs (e.g. /news/01knxxxxx/slug)
+# These are third-party articles wrapped in Fotmob's JS viewer, which often
+# fails to load. We detect them and resolve to the original publisher URL.
+EXTERNAL_FOTMOB_RE = re.compile(r'/news/[0-9a-z]{8,26}/')
+
+
+async def _get_embed_source_url(browser, fotmob_url: str) -> Optional[str]:
+    """
+    Fetch the Fotmob /embed/news/ page for an article and extract the original
+    publisher URL via (in priority order):
+      1. <link rel="canonical"> pointing to a non-Fotmob domain
+      2. <meta property="og:url"> pointing to a non-Fotmob domain
+      3. <iframe src> pointing to an external domain
+      4. Any prominent external anchor link on the page
+    Returns the original URL string, or None if not found.
+    """
+    embed_url = fotmob_url.replace("/news/", "/embed/news/")
+    page = await browser.new_page(user_agent=(
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+    ))
+    try:
+        await page.goto(embed_url, timeout=20_000, wait_until="domcontentloaded")
+        await page.wait_for_timeout(2_500)
+
+        result = await page.evaluate("""
+            () => {
+                const isFotmob = (u) => !u || u.includes('fotmob.com');
+
+                // 1. Canonical link
+                const canon = document.querySelector("link[rel='canonical']");
+                if (canon && canon.href && !isFotmob(canon.href) && canon.href.startsWith('http'))
+                    return canon.href;
+
+                // 2. og:url
+                const ogUrl = document.querySelector("meta[property='og:url']");
+                const ogVal = ogUrl && ogUrl.getAttribute('content');
+                if (ogVal && !isFotmob(ogVal) && ogVal.startsWith('http'))
+                    return ogVal;
+
+                // 3. iframe src
+                const iframe = document.querySelector('iframe[src]');
+                if (iframe && iframe.src && !isFotmob(iframe.src) && iframe.src.startsWith('http'))
+                    return iframe.src;
+
+                // 4. Prominent external anchor
+                const SKIP_DOMAINS = ['google.com', 'facebook.com', 'twitter.com', 'instagram.com'];
+                const links = Array.from(document.querySelectorAll('a[href]'));
+                const ext = links.find(a =>
+                    a.href.startsWith('http') &&
+                    !isFotmob(a.href) &&
+                    !SKIP_DOMAINS.some(d => a.href.includes(d)) &&
+                    a.textContent.trim().length > 10
+                );
+                if (ext) return ext.href;
+
+                return null;
+            }
+        """)
+
+        if result and isinstance(result, str) and result.startswith("http") and "fotmob.com" not in result:
+            return result
+
+    except PlaywrightTimeout:
+        print(f"    ⚠️  Timeout resolving embed: {embed_url}")
+    except Exception as e:
+        print(f"    ⚠️  Embed resolve error for {fotmob_url}: {e}")
+    finally:
+        await page.close()
+
+    return None
+
+
+async def resolve_external_fotmob_urls(browser, articles: list[dict]) -> list[dict]:
+    """
+    For Fotmob articles whose URLs match the external short-ID pattern,
+    concurrently visit their embed pages and swap in the original publisher URL.
+    Native Fotmob articles (long numeric IDs) are passed through unchanged.
+    """
+    external = [a for a in articles if EXTERNAL_FOTMOB_RE.search(a.get("url", ""))]
+    if not external:
+        return articles
+
+    print(f"  🔍 Resolving {len(external)} external Fotmob article URLs...")
+    sem = asyncio.Semaphore(4)  # cap concurrent browser pages
+
+    async def resolve_one(article: dict):
+        async with sem:
+            original = await _get_embed_source_url(browser, article["url"])
+            if original:
+                short_title = article["title"][:50]
+                print(f"    ✓ '{short_title}...' → {original[:70]}")
+                article["url"] = original
+                article["id"]  = make_id(original)   # re-hash on new URL
+
+    await asyncio.gather(*[resolve_one(a) for a in external])
+    return articles
+
+
 def _find_timestamp(container, url: str) -> Optional[datetime]:
     """Timestamp fallback chain per scraper_sop.md."""
     # 1. <time> tag
@@ -302,6 +403,8 @@ async def run_scraper() -> dict:
             html = await fetch_fotmob_html(browser)
             if html:
                 fotmob_articles = parse_fotmob(html, cutoff)
+                # Resolve external wrapper URLs → original publisher URLs
+                fotmob_articles = await resolve_external_fotmob_urls(browser, fotmob_articles)
                 print(f"  ✅ Fotmob: {len(fotmob_articles)} articles")
                 all_articles.extend(fotmob_articles)
             else:
