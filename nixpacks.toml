@@ -1,8 +1,3 @@
-[variables]
-# Browsers installed here at build time persist into the runtime container.
-# The default /root/.cache/ path is NOT preserved across build→runtime.
-PLAYWRIGHT_BROWSERS_PATH = "/app/.playwright-browsers"
-
 [phases.setup]
 nixPkgs = [
   "chromium",
@@ -35,11 +30,9 @@ nixPkgs = [
 [phases.install]
 cmds = [
   "pip install -r requirements.txt",
-  "playwright install chromium",
 ]
 
 [start]
-# Railway uses this, NOT the Procfile, when nixpacks.toml is present.
-# Run playwright install first — instant if build already installed it,
-# downloads fresh (~60s) if the build artifact didn't persist.
-cmd = "playwright install chromium && gunicorn --worker-class sync --workers 1 --bind 0.0.0.0:$PORT --timeout 30 --chdir tools server:app"
+# scraper.py uses shutil.which('chromium') to find the nixPkgs system
+# Chromium at runtime — no 'playwright install' download needed.
+cmd = "gunicorn --worker-class sync --workers 1 --bind 0.0.0.0:$PORT --timeout 30 --chdir tools server:app"

@@ -14,24 +14,29 @@ import hashlib
 import json
 import os
 import re
+import shutil
 import sys
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Optional
 from urllib.parse import urljoin
 
-# ─── Playwright Browser Path ──────────────────────────────────────────────────
-# Must be set BEFORE playwright is imported.
-# On Railway, browsers are installed to /app/.playwright-browsers/ at build
-# time. The default /root/.cache/ path is not preserved between build and
-# runtime containers, so we hardcode the path here as the source of truth.
-if not os.environ.get("PLAYWRIGHT_BROWSERS_PATH"):
-    os.environ["PLAYWRIGHT_BROWSERS_PATH"] = "/app/.playwright-browsers"
-
 import feedparser
 from bs4 import BeautifulSoup
 from dateutil import parser as dateparser
 from playwright.async_api import async_playwright, TimeoutError as PlaywrightTimeout
+
+# ─── System Chromium Detection ──────────────────────────────────────────────────
+# On Railway, Chromium is installed via nixPkgs and available in PATH.
+# Using it directly avoids all 'playwright install' browser download issues.
+# On local Mac dev, shutil.which() returns None and Playwright uses its own
+# managed browser from ~/Library/Caches/ms-playwright/ as normal.
+_SYSTEM_CHROMIUM = (
+    shutil.which('chromium') or
+    shutil.which('chromium-browser') or
+    shutil.which('google-chrome-stable') or
+    shutil.which('google-chrome')
+)
 
 # ─── Paths ────────────────────────────────────────────────────────────────────
 ROOT        = Path(__file__).parent.parent
@@ -407,7 +412,15 @@ async def run_scraper() -> dict:
 
     # ── Fotmob (Playwright) ───────────────────────────────────────────────────
     async with async_playwright() as pw:
-        browser = await pw.chromium.launch(headless=True)
+        # Use system Chromium (nixPkgs) on Railway; Playwright's managed
+        # browser on local. This avoids all 'playwright install' complications.
+        launch_kwargs: dict = {"headless": True}
+        if _SYSTEM_CHROMIUM:
+            print(f"  🖥️  Using system Chromium: {_SYSTEM_CHROMIUM}")
+            launch_kwargs["executable_path"] = _SYSTEM_CHROMIUM
+        else:
+            print("  🖥️  Using Playwright-managed Chromium (local dev)")
+        browser = await pw.chromium.launch(**launch_kwargs)
         try:
             html = await fetch_fotmob_html(browser)
             if html:
