@@ -4,3 +4,4 @@ python-dateutil
 feedparser
 flask
 flask-cors
+gunicorn

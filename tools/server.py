@@ -119,22 +119,21 @@ def health():
     })
 
 
-# ─── Startup ─────────────────────────────────────────────────────────────────
+# ─── Startup Bootstrap ───────────────────────────────────────────────────────
+# Runs whether started via `python server.py` OR gunicorn (module-level).
+if not DATA_FILE.exists():
+    print("\n📭 No data file found — running initial scrape...")
+    success, msg = run_scraper()
+    if success:
+        print("✅ Initial scrape complete")
+    else:
+        print(f"⚠️  Initial scrape failed: {msg}\n   Starting server anyway.")
 
+# ─── Dev entry point ──────────────────────────────────────────────────────────
 if __name__ == "__main__":
     print(f"\n⚽  Eric's Footy Site — Server starting")
     print(f"   Root:     {ROOT}")
     print(f"   Frontend: {FRONTEND_DIR}")
     print(f"   Data:     {DATA_FILE}")
-
-    # Bootstrap: run scraper if no data exists yet
-    if not DATA_FILE.exists():
-        print("\n📭 No data file found — running initial scrape...")
-        success, msg = run_scraper()
-        if success:
-            print("✅ Initial scrape complete")
-        else:
-            print(f"⚠️  Initial scrape failed: {msg}\n   Starting server anyway.")
-
     print(f"\n🚀 Server ready at http://localhost:{PORT}\n")
     app.run(host="0.0.0.0", port=PORT, debug=False)
