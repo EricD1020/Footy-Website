@@ -1,3 +1,8 @@
+[variables]
+# Install Playwright browsers into /app/ so they survive into the runtime
+# container. The default /root/.cache/ path is discarded between build & run.
+PLAYWRIGHT_BROWSERS_PATH = "/app/.playwright-browsers"
+
 [phases.setup]
 nixPkgs = [
   "chromium",
@@ -33,5 +38,4 @@ cmds = [
   "playwright install chromium",
 ]
 
-# NOTE: No [start] block here — Railway uses the Procfile instead.
-# Having both causes a conflict; Procfile with gunicorn is the correct prod server.
+# NOTE: No [start] block — Railway uses the Procfile.
